@@ -17,6 +17,60 @@ use threads; # used for non-blocking GUI responsiveness
 # begin wxGlade: extracode
 # end wxGlade
 
+package MyDialog;
+
+use Wx qw[:everything];
+use base qw(Wx::Dialog);
+use strict;
+
+sub new {
+    my( $self, $parent, $id, $title, $pos, $size, $style, $name ) = @_;
+    $parent = undef              unless defined $parent;
+    $id     = -1                 unless defined $id;
+    $title  = ""                 unless defined $title;
+    $pos    = wxDefaultPosition  unless defined $pos;
+    $size   = wxDefaultSize      unless defined $size;
+    $name   = ""                 unless defined $name;
+
+    # begin wxGlade: MyDialog::new
+    $style = wxDEFAULT_DIALOG_STYLE
+        unless defined $style;
+
+    $self = $self->SUPER::new( $parent, $id, $title, $pos, $size, $style, $name );
+    $self->SetTitle("About");
+    
+    $self->{sizer_1} = Wx::StaticBoxSizer->new(Wx::StaticBox->new($self, wxID_ANY, "About Perl+OpenMP"), wxVERTICAL);
+    
+    $self->{grid_sizer_1} = Wx::GridBagSizer->new(0, 0);
+    $self->{sizer_1}->Add($self->{grid_sizer_1}, 1, wxEXPAND, 0);
+    
+    my $bitmap_1 = Wx::StaticBitmap->new($self->{sizer_1}->GetStaticBox(), wxID_ANY, Wx::Bitmap->new("./project-logo.jpg", wxBITMAP_TYPE_ANY));
+    $self->{grid_sizer_1}->Add($bitmap_1, Wx::GBPosition->new(0, 1), Wx::GBSpan->new(1, 1), wxALIGN_CENTER_HORIZONTAL, 0);
+    
+    $self->{grid_sizer_1}->Add(20, 20, Wx::GBPosition->new(1, 1), Wx::GBSpan->new(1, 1), wxEXPAND, 0);
+    
+    $self->{hyperlink_1} = Wx::HyperlinkCtrl->new($self->{sizer_1}->GetStaticBox(), wxID_ANY, "The Perl+OpenMP Project", "https://github.com/Perl-OpenMP", wxDefaultPosition, wxDefaultSize, wxHL_DEFAULT_STYLE);
+    $self->{grid_sizer_1}->Add($self->{hyperlink_1}, Wx::GBPosition->new(2, 1), Wx::GBSpan->new(1, 1), 0, 0);
+    
+    $self->{sizer_2} = Wx::StdDialogButtonSizer->new();
+    $self->{sizer_1}->Add($self->{sizer_2}, 0, wxALL, 4);
+    
+    $self->{sizer_2}->Realize();
+    
+    $self->SetSizer($self->{sizer_1});
+    $self->{sizer_1}->Fit($self);
+    
+    $self->Layout();
+    # end wxGlade
+    return $self;
+
+}
+
+
+# end of class MyDialog
+
+1;
+
 package MyFrame;
 
 use Wx qw[:everything];
@@ -47,7 +101,8 @@ sub new {
     $self->{frame_menubar} = Wx::MenuBar->new();
     my $wxglade_tmp_menu;
     $wxglade_tmp_menu = Wx::Menu->new();
-    $wxglade_tmp_menu->Append(wxID_ANY, "About", "");
+    $self->{about} = $wxglade_tmp_menu->Append(wxID_ANY, "About", "");
+    $self->{exit} = $wxglade_tmp_menu->Append(wxID_ANY, "Exit", "");
     $self->{frame_menubar}->Append($wxglade_tmp_menu, "Help");
     $self->SetMenuBar($self->{frame_menubar});
     
@@ -56,7 +111,7 @@ sub new {
     
     $self->{panel_1} = Wx::Panel->new($self, wxID_ANY);
     
-    $self->{sizer_1} = Wx::FlexGridSizer->new(2, 3, 0, 0);
+    $self->{sizer_1} = Wx::FlexGridSizer->new(1, 3, 0, 0);
     
     $self->{grid_sizer_1} = Wx::StaticBoxSizer->new(Wx::StaticBox->new($self->{panel_1}, wxID_ANY, "OpenMP Threads"), wxVERTICAL);
     $self->{sizer_1}->Add($self->{grid_sizer_1}, 1, wxALL|wxEXPAND, 0);
@@ -87,6 +142,8 @@ sub new {
     $self->{panel_1}->SetSizer($self->{sizer_1});
     
     $self->Layout();
+    Wx::Event::EVT_MENU($self, $self->{about}->GetId, $self->can('showAboutModal'));
+    Wx::Event::EVT_MENU($self, $self->{exit}->GetId, $self->can('onExit'));
     Wx::Event::EVT_BUTTON($self, $self->{button_1}->GetId, $self->can('makeOpenMPBusy'));
 
     # end wxGlade
@@ -124,15 +181,19 @@ int _check_num_threads() {
 #define P 2000  // Size of the matrix (increase P for more stress)
 
 void matrix_multiply(double *A, double *B, double *C, int n, int m, int p) {
-    #pragma omp parallel for collapse(2)
+
+  #pragma omp parallel
+  {
+  #pragma omp for collapse(2)
     for (int i = 0; i < n; i++) {
-        for (int j = 0; j < p; j++) {
-            C[i * p + j] = 0;
-            for (int k = 0; k < m; k++) {
-                C[i * p + j] += A[i * m + k] * B[k * p + j];
-            }
+      for (int j = 0; j < p; j++) {
+        C[i * p + j] = 0;
+        for (int k = 0; k < m; k++) {
+          C[i * p + j] += A[i * m + k] * B[k * p + j];
         }
+      }
     }
+  }
 }
 
 int dowork() {
@@ -162,13 +223,16 @@ int dowork() {
 EOC
       with => qw/OpenMP::Simple/,
     );
-    my $omp = OpenMP->new; # place in $self ...
+
+    my $omp = OpenMP->new;
+    my $want_num_threads = $self->{spin_ctrl_1}->GetValue(); # from spin-controller
+    $omp->env->omp_num_threads($want_num_threads);           # set %ENV
 
     $self->{worker_thread} = threads->create(
       sub {
-         while ($self->{checkbox_1}->IsChecked()) {
-           my $want_num_threads = $self->{spin_ctrl_1}->GetValue();
-           $omp->env->omp_num_threads($want_num_threads);
+	 my ($self, $want_num_threads) = @_;
+	 # repeats while the box is checked and the number of threads has not changed
+         while ($self->{checkbox_1}->IsChecked() and $want_num_threads == $self->{spin_ctrl_1}->GetValue()) {
            my $got_num_threads = _check_num_threads();
            printf "INFO: %0d threads spawned in the OpenMP runtime, expecting %0d\n",
                   $got_num_threads, $want_num_threads;
@@ -178,8 +242,10 @@ EOC
          }
          $self->{button_1}->SetLabel("Start");
          $self->{button_1}->Enable(1);
+	 return;
       },
-      $self
+      $self,
+      $want_num_threads
     );
 }
 
@@ -189,6 +255,23 @@ sub updateSpinner {
     # wxGlade: MyFrame::updateSpinner <event_handler>
     # end wxGlade
     $self->{spin_ctrl_1}->SetValue($self->{slider_1}->GetValue());
+}
+
+
+sub onExit {
+    my ($self, $event) = @_;
+    # wxGlade: MyFrame::onExit <event_handler>
+    # end wxGlade
+    $self->Close(1);  # This will close the main window and exit the event loop
+}
+
+
+sub showAboutModal {
+    my ($self, $event) = @_;
+    # wxGlade: MyFrame::showAboutModal <event_handler>
+    # end wxGlade
+    my $aboutDialog = MyDialog->new();
+    $aboutDialog->ShowModal;
 }
 
 # end of class MyFrame
